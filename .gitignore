@@ -1,0 +1,10 @@
+.dropbox
+/docs
+/images
+/download
+/libs
+*.JPG
+*.MPO
+*.jpg
+/scripts
+desktop.ini
