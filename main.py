@@ -7,10 +7,14 @@ import sys, os
 import mpo
 import cv2
 import numpy as np
+from numpy import ma
 from matplotlib import pyplot as plt
 from Tkinter import *
 import Tkinter, Tkconstants, tkFileDialog
 from tkFileDialog import askopenfilename
+
+# cross_talk = np.matrix('0.03 0.03 0.03 0.03; 0.04 0.04 0.04 0.04; 0.03 0.03 0.03 0.03')
+cross_talk = np.matrix('0.11 0.11 0.11 0.11; 0.17 0.17 0.17 0.17; 0.11 0.11 0.11 0.11')
 
 def detach_stereo_image(file, filename):
 	image = cv2.imread(file)
@@ -49,7 +53,7 @@ class App(Tkinter.Frame):
 		self.file_opt = options = {}
 		options['defaultextension'] = '.MPO'
 		options['filetypes'] = [('All file', '.*'), ('MPO file', '.MPO'), ('JPEG file', '.jpg')]
-		options['initialdir'] = '/media/STUDY/Dopbox/3d-image-processing'
+		options['initialdir'] = '/media/STUDY/Dopbox/3d-image-processing/'
 		options['initialfile'] = 'demo.MPO'
 		options['parent'] = root
 		options['title'] = 'Select an image file'
@@ -68,13 +72,16 @@ class App(Tkinter.Frame):
 		images = None
 		if self.filename.split('.')[1].upper() == 'MPO':
 			images = mpo.extractImagePair(self.file, self.filename[:-4], False)
-			self.left = cv2.resize(cv2.imread(images[0], 1), (0,0), fx = 0.6, fy = 0.6)
-			self.right = cv2.resize(cv2.imread(images[1], 1), (0,0), fx = 0.6, fy = 0.6)
+			self.left = cv2.resize(cv2.imread(images[0], 1), (600, 800))
+			self.right = cv2.resize(cv2.imread(images[1], 1), (600, 800))
 		else:
 			images = detach_stereo_image(self.file, self.filename)
 			self.left = images[0]
 			self.right = images[1]
 		self.size = self.left.shape[:2]
+		# print self.size
+		vis = np.concatenate((self.left, self.right), axis=1)
+		cv2.imwrite('1_origin_' + self.filename[:-3] + 'jpg', vis)
 		return self
 
 	def calculate_matches(self):
@@ -110,16 +117,59 @@ class App(Tkinter.Frame):
 		self.size = self.left.shape[:2]
 		return self
 
+	def reduce_ghost(self, cross_talk):
+		row = cross_talk.shape[0]
+		col = cross_talk.shape[1]
+		step_x = self.size[0]/row
+		step_y = self.size[1]/col
+
+		for i in range(row):
+			for j in range(col):
+				a = i * step_x
+				a1 = (i + 1) * step_x
+				b = j * step_y
+				b1 = (j + 1) * step_y
+				temp_left = self.left[a:a1, b:b1]
+				temp_right = self.right[a:a1, b:b1]
+				cross_talk_val = cross_talk.item((i, j))
+				inverse_reduce = 1 / (1 - cross_talk_val)
+				l = inverse_reduce * (temp_left - cross_talk_val * temp_right)
+				r = inverse_reduce * (temp_right - cross_talk_val * temp_left)
+				
+				l = np.int_(l)
+				r = np.int_(r)
+
+				l = np.asarray(l)
+				r = np.asarray(r)
+
+				# Set value < 0 to 0
+				low_indexes_l = l < 0
+				l[low_indexes_l] = 0
+				low_indexes_r = r < 0
+				r[low_indexes_r] = 0
+
+				# Set value > 255 to 255
+				hight_indexes_l = l > 255
+				l[hight_indexes_l] = 255
+				hight_indexes_r = r > 255
+				r[hight_indexes_r] = 255
+
+				self.left[a:a1, b:b1] = l
+				self.right[a:a1, b:b1] = r
+
 	def run(self):
 		self.pre_proc()
 		self.calculate_matches()
 		self.calculate_shift()
 		self.pos_proc()
+		self.reduce_ghost(cross_talk)
+
 		vis = np.concatenate((self.left, self.right), axis=1)
-		cv2.imwrite(self.filename[:-3] + 'jpg', vis)
+		cv2.imwrite('final_' + self.filename[:-3] + 'jpg', vis)
+
 		Tkinter.Label(self, text = 'Done').pack(padx=5, pady=5)		
-		# cv2.imshow("Concated", vis)
-		# cv2.waitKey(0)
+		cv2.imshow("Concated", vis)
+		cv2.waitKey(0)
 
 root = Tkinter.Tk()
 root.title('3D image processing')
